@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Ordeal
     ( launchStackGhci
     ) where
@@ -5,6 +7,7 @@ module Ordeal
 import qualified Control.Concurrent.Async as Async
 import           Control.Monad (forever, void)
 import qualified Data.Text.IO as TextIO
+import           System.FSNotify (withManager, watchDir)
 import           System.Process ( CreateProcess(..)
                                 , StdStream(..)
                                 , CmdSpec(..)
@@ -30,8 +33,6 @@ processSpec = CreateProcess {
 
 launchStackGhci :: IO ()
 launchStackGhci = do
-
-
     (Just stdinH, Just stdoutH, _err, _processHandle) <- createProcess processSpec
 
     hSetBuffering stdin     NoBuffering
@@ -42,4 +43,13 @@ launchStackGhci = do
     let inPipe  = forever (TextIO.hGetChunk stdin   >>= TextIO.hPutStr stdinH)
     let outPipe = forever (TextIO.hGetChunk stdoutH >>= TextIO.hPutStr stdout)
 
-    void (Async.concurrently inPipe outPipe)
+    withManager $ \mgr -> do
+      -- start a watching job (in the background)
+      watchDir
+        mgr          -- manager
+        "src"          -- directory to watch
+        (const True) -- predicate
+        (const (  TextIO.hPutStrLn stdinH ":reload"))        -- action
+
+    --  Async.async outPipe >>= Async.wait
+      void (Async.concurrently inPipe outPipe)
