@@ -1,6 +1,6 @@
 module Main where
 
-import Lib
+import Ordeal
 
 main :: IO ()
-main = someFunc
+main = launchStackGhci
