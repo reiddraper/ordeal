@@ -5,9 +5,16 @@ module Ordeal
     ) where
 
 import qualified Control.Concurrent.Async as Async
-import           Control.Monad (forever, void)
+import qualified Control.Concurrent.MVar as MVar
+import           Control.Concurrent (threadDelay)
+import           Control.Concurrent.Chan (newChan, readChan)
+import           Control.Monad (forever, unless, void)
+import           Data.Monoid ((<>), mempty)
+import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
-import           System.FSNotify (WatchConfig(..), Debounce(..), withManagerConf, defaultConfig, watchTree)
+import           System.FSNotify (WatchConfig(..), Debounce(..), withManagerConf, defaultConfig, watchTreeChan)
+import           System.Environment (getArgs)
+import           System.Exit (exitFailure)
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Signals (Signal, signalProcess, sigINT)
 import           System.Process ( CreateProcess(..)
@@ -36,9 +43,9 @@ signalProcessHandle pHandle signal = do
     let pId = CPid (fromIntegral pid)
     signalProcess signal pId
 
-processSpec :: CreateProcess
-processSpec = CreateProcess {
-    cmdspec         = RawCommand "stack" ["ghci"]
+processSpec :: String -> [String] -> CreateProcess
+processSpec cmd args = CreateProcess {
+    cmdspec         = RawCommand cmd args
   , cwd             = Nothing
   , env             = Nothing
   , std_in          = CreatePipe
@@ -50,26 +57,56 @@ processSpec = CreateProcess {
 
 launchStackGhci :: IO ()
 launchStackGhci = do
-    (Just stdinH, Just stdoutH, _err, processHandle) <- createProcess processSpec
+    let defaultreplCommand = ("stack", ["ghci"])
+    args <- getArgs
+    ((cmd, cmdArgs), sCommand) <- maybe exitFailure return $
+            case args of
+                [userCommand] ->
+                    Just (defaultreplCommand, userCommand)
+                [userReplCommand, userCommand] ->
+                    Just ((head (words userReplCommand), tail (words userReplCommand)), userCommand)
+                _ -> Nothing
+    (Just stdinH, Just stdoutH, _err, processHandle) <- createProcess (processSpec cmd cmdArgs)
+
+    let command = Text.pack sCommand
 
     hSetBuffering stdin     NoBuffering
     hSetBuffering stdout    NoBuffering
-    hSetBuffering stdinH    LineBuffering
+    hSetBuffering stdinH    NoBuffering
     hSetBuffering stdoutH   NoBuffering
 
+    readVar <- MVar.newEmptyMVar
     let inPipe  = forever (TextIO.hGetChunk stdin   >>= TextIO.hPutStr stdinH)
-    let outPipe = forever (TextIO.hGetChunk stdoutH >>= TextIO.hPutStr stdout)
+    let outPipe = forever (do
+                            t <- TextIO.hGetChunk stdoutH
+                            MVar.putMVar readVar t
+                            TextIO.hPutStr stdout t)
+
+    let prompt = "ghci> "
 
     let reloadAction _ = do
             void (Async.async (signalProcessHandle processHandle sigINT))
             TextIO.hPutStrLn stdinH ":reload"
+            TextIO.hPutStrLn stdinH command
 
-    withManagerConf (defaultConfig {confDebounce = Debounce 0.1}) $ \mgr -> do
-      void $ watchTree
+    withManagerConf (defaultConfig {confDebounce = Debounce 0.5}) $ \mgr -> do
+      chan <- newChan
+      void $ watchTreeChan
         mgr
         "."
         (const True)
-        reloadAction
+        chan
 
-    --  Async.async outPipe >>= Async.wait
-      void (Async.concurrently inPipe outPipe)
+      void (Async.async (forever (readChan chan >>= reloadAction)))
+
+      a <- Async.async (Async.concurrently inPipe outPipe)
+      let looper acc = do
+            t <- MVar.takeMVar readVar
+            let newAcc = acc <> t
+            unless (Text.isSuffixOf prompt newAcc) (looper newAcc)
+      looper mempty
+      void (Async.async (forever (MVar.takeMVar readVar)))
+      threadDelay 1000000
+      TextIO.hPutStrLn stdinH command
+      TextIO.hPutStrLn stdout command
+      void (Async.wait a)
