@@ -6,7 +6,6 @@ module Ordeal
 
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.MVar as MVar
-import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Chan (newChan, readChan)
 import           Control.Monad (forever, unless, void)
 import           Data.Monoid ((<>), mempty)
@@ -106,7 +105,6 @@ launchStackGhci = do
             unless (Text.isSuffixOf prompt newAcc) (looper newAcc)
       looper mempty
       void (Async.async (forever (MVar.takeMVar readVar)))
-      threadDelay 1000000
       TextIO.hPutStrLn stdinH command
       TextIO.hPutStrLn stdout command
       void (Async.wait a)
