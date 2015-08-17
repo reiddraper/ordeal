@@ -13,7 +13,6 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import           System.FSNotify (WatchConfig(..), Debounce(..), withManagerConf, defaultConfig, watchTreeChan)
 import           System.Environment (getArgs)
-import           System.Exit (exitFailure)
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Signals (Signal, signalProcess, sigINT)
 import           System.Process ( CreateProcess(..)
@@ -58,16 +57,14 @@ launchStackGhci :: IO ()
 launchStackGhci = do
     let defaultreplCommand = ("stack", ["ghci"])
     args <- getArgs
-    ((cmd, cmdArgs), sCommand) <- maybe exitFailure return $
+    let (cmd, cmdArgs) =
             case args of
-                [userCommand] ->
-                    Just (defaultreplCommand, userCommand)
-                [userReplCommand, userCommand] ->
-                    Just ((head (words userReplCommand), tail (words userReplCommand)), userCommand)
-                _ -> Nothing
+                [] ->
+                    defaultreplCommand
+                x:xs -> (x,xs)
     (Just stdinH, Just stdoutH, _err, processHandle) <- createProcess (processSpec cmd cmdArgs)
 
-    let command = Text.pack sCommand
+    command <- TextIO.readFile ".ordeal"
 
     hSetBuffering stdin     NoBuffering
     hSetBuffering stdout    NoBuffering
