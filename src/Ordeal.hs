@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Ordeal
@@ -8,7 +9,10 @@ import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.MVar as MVar
 import           Control.Concurrent.Chan (newChan, readChan)
 import           Control.Monad (forever, unless, void)
-import           Data.Monoid ((<>), mempty)
+#if __GLASGOW_HASKELL__ < 710
+import           Data.Monoid (mempty)
+#endif
+import           Data.Monoid ((<>))
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import           System.FSNotify (WatchConfig(..), Debounce(..), withManagerConf, defaultConfig, watchTreeChan)
