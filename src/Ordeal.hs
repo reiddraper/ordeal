@@ -55,7 +55,17 @@ processSpec cmd args = CreateProcess {
   , std_err         = Inherit
   , close_fds       = False
   , create_group    = False
-  , delegate_ctlc   = False }
+  , delegate_ctlc   = False
+#if MIN_VERSION_process(1,3,0)
+  , detach_console     = False
+  , create_new_console = False
+  , new_session        = False
+#endif
+#if MIN_VERSION_process(1,4,0)
+  , child_group     = Nothing
+  , child_user      = Nothing
+#endif
+  }
 
 launchStackGhci :: IO ()
 launchStackGhci = do
